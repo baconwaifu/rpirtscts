@@ -40,6 +40,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <stdbool.h>
 
 unsigned gpio_base()
 { /* adapted from bcm_host.c */
@@ -123,14 +124,26 @@ int rpi_gpio_header_type() {
 
 
 void set_rts_cts(int enable) {
+	char* memdev;
+	bool gpiomem = false;
+	void *gpio_map;
+	if ( access("/dev/gpiomem", F_OK) != -1 ) { //the 'sane' way to do things
+		memdev = "/dev/gpiomem"; //use the dedicated GPIO memory device instead of global RAM
+		gpiomem = true;
+	} else { //the legacy method
+		memdev = "/dev/mem";
+	}
 	int gfpsel, gpiomask;
-	int fd = open("/dev/mem", O_RDWR|O_SYNC);
+	int fd = open(memdev, O_RDWR|O_SYNC);
 	if (fd < 0) {
-		fprintf(stderr, "can't open /dev/mem (%s)\n", strerror(errno));
+		fprintf(stderr, "can't open %s (%s)\n", memdev, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
-	
-	void *gpio_map = mmap(NULL, BLOCK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fd, gpio_base());
+	if (!gpiomem) { //using /dev/mem, we need to use the base GPIO address
+		gpio_map = mmap(NULL, BLOCK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fd, gpio_base());
+	} else { //we're using the GPIO-specific memory device, offset 0 is the base address
+		gpio_map = mmap(NULL, BLOCK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+	}
 	close(fd);
 	if (gpio_map == MAP_FAILED) {
 		fprintf(stderr, "mmap error (%s)\n", strerror(errno));
